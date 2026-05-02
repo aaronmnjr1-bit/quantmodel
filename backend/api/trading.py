@@ -48,7 +48,6 @@ async def execute_trade(request: Request, trade_req: TradeRequest) -> dict[str, 
     from trading.mt5_engine import MT5Engine
 
     engine = MT5Engine()
-    bot_state = request.app.state.bot_state
     try:
         result = await engine.execute_trade(
             symbol=trade_req.symbol,
@@ -62,6 +61,7 @@ async def execute_trade(request: Request, trade_req: TradeRequest) -> dict[str, 
         raise HTTPException(status_code=500, detail="Trade execution failed")
 
     if result.get("success"):
+        bot_state = request.app.state.bot_state
         await _trade_repo.save_trade(
             symbol=trade_req.symbol,
             direction=trade_req.direction,
@@ -91,14 +91,16 @@ async def get_positions(request: Request) -> dict[str, Any]:
 @router.delete("/positions/{ticket}")
 async def close_position(ticket: int, request: Request) -> dict[str, Any]:
     from trading.mt5_engine import MT5Engine
+    from loguru import logger
 
     engine = MT5Engine()
 
     # Capture PnL from open position before closing
     positions = await engine.get_positions()
-    pos_pnl = next(
-        (p.get("pnl", 0.0) for p in positions if p.get("ticket") == ticket), 0.0
-    )
+    matched = next((p for p in positions if p.get("ticket") == ticket), None)
+    if matched is None:
+        logger.warning(f"Position {ticket} not found in open positions — PnL will be recorded as 0.0")
+    pos_pnl = matched.get("pnl", 0.0) if matched else 0.0
 
     try:
         result = await engine.close_position(ticket)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from loguru import logger
@@ -15,16 +16,19 @@ except ImportError:
 
 from config import settings
 
+_MEMORY_MAX_ENTRIES = 256  # evict oldest when limit is reached
+
 
 class RedisCache:
     """
     Async Redis cache layer for analysis results.
-    Falls back to in-memory dict when Redis is unavailable.
+    Falls back to in-memory dict (with TTL) when Redis is unavailable.
     """
 
     def __init__(self) -> None:
         self._client: Any = None
-        self._memory: dict[str, str] = {}
+        # In-memory store maps key -> (serialized_value, expiry_epoch)
+        self._memory: dict[str, tuple[str, float]] = {}
         self._available = False
 
     async def connect(self) -> None:
@@ -54,9 +58,16 @@ class RedisCache:
         try:
             if self._available and self._client:
                 raw = await self._client.get(key)
-            else:
-                raw = self._memory.get(key)
-            return json.loads(raw) if raw else None
+                return json.loads(raw) if raw else None
+            # In-memory: check TTL
+            entry = self._memory.get(key)
+            if entry is None:
+                return None
+            value_str, expiry = entry
+            if time.monotonic() > expiry:
+                del self._memory[key]
+                return None
+            return json.loads(value_str)
         except Exception as exc:
             logger.debug(f"Cache get error for {key!r}: {exc}")
             return None
@@ -67,7 +78,11 @@ class RedisCache:
             if self._available and self._client:
                 await self._client.set(key, serialized, ex=ttl)
             else:
-                self._memory[key] = serialized
+                # Evict oldest entry when at capacity
+                if len(self._memory) >= _MEMORY_MAX_ENTRIES:
+                    oldest_key = next(iter(self._memory))
+                    del self._memory[oldest_key]
+                self._memory[key] = (serialized, time.monotonic() + ttl)
         except Exception as exc:
             logger.debug(f"Cache set error for {key!r}: {exc}")
 

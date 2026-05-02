@@ -117,15 +117,18 @@ class TradeRepository:
 
                 # Peak-to-trough drawdown using running cumulative PnL ordered by trade open time
                 with_time = [t for t in closed if t.opened_at is not None]
-                pnls = sorted(with_time, key=lambda t: t.opened_at)  # type: ignore[arg-type]
+                pnls_sorted = sorted(
+                    with_time, key=lambda t: t.opened_at  # type: ignore[return-value]
+                )
                 cumulative = 0.0
                 peak = 0.0
                 max_dd = 0.0
-                for t in pnls:
+                for t in pnls_sorted:
                     cumulative += t.pnl
                     if cumulative > peak:
                         peak = cumulative
-                    dd = (peak - cumulative) / max(abs(peak), 1) * 100
+                    # Use max(peak, 1) — peak is always >= 0 since it only grows
+                    dd = (peak - cumulative) / max(peak, 1) * 100
                     if dd > max_dd:
                         max_dd = dd
 
