@@ -4,7 +4,10 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from trading.trade_repository import TradeRepository
+
 router = APIRouter()
+_trade_repo = TradeRepository()
 
 
 class TradeRequest(BaseModel):
@@ -56,6 +59,23 @@ async def execute_trade(request: Request, trade_req: TradeRequest) -> dict[str, 
         )
     except Exception:
         raise HTTPException(status_code=500, detail="Trade execution failed")
+
+    if result.get("success"):
+        bot_state = request.app.state.bot_state
+        await _trade_repo.save_trade(
+            symbol=trade_req.symbol,
+            direction=trade_req.direction,
+            volume=trade_req.volume,
+            entry_price=result.get("price"),
+            sl=trade_req.sl,
+            tp=trade_req.tp,
+            ticket=result.get("ticket"),
+            mode=bot_state.mode,
+            comment=trade_req.comment,
+            status="open",
+        )
+        bot_state.trades_today += 1
+
     return result
 
 
@@ -71,12 +91,25 @@ async def get_positions(request: Request) -> dict[str, Any]:
 @router.delete("/positions/{ticket}")
 async def close_position(ticket: int, request: Request) -> dict[str, Any]:
     from trading.mt5_engine import MT5Engine
+    from loguru import logger
 
     engine = MT5Engine()
+
+    # Capture PnL from open position before closing
+    positions = await engine.get_positions()
+    matched = next((p for p in positions if p.get("ticket") == ticket), None)
+    if matched is None:
+        logger.warning(f"Position {ticket} not found in open positions — PnL will be recorded as 0.0")
+    pos_pnl = matched.get("pnl", 0.0) if matched else 0.0
+
     try:
         result = await engine.close_position(ticket)
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to close position")
+
+    if result.get("success"):
+        await _trade_repo.close_trade(ticket, close_pnl=pos_pnl)
+
     return result
 
 
@@ -108,3 +141,11 @@ async def reject_trade(trade_id: str, request: Request) -> dict[str, Any]:
     if not result:
         raise HTTPException(status_code=404, detail="Trade not found")
     return {"status": "rejected", "trade_id": trade_id}
+
+
+@router.get("/history")
+async def get_trade_history(
+    limit: int = 100, symbol: str | None = None
+) -> dict[str, Any]:
+    trades = await _trade_repo.get_history(limit=limit, symbol=symbol)
+    return {"trades": trades, "count": len(trades)}

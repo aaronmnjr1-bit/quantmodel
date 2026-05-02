@@ -43,14 +43,8 @@ async def get_dashboard_summary(request: Request) -> dict[str, Any]:
 
 @router.get("/performance")
 async def get_performance() -> dict[str, Any]:
-    """Return mock performance metrics."""
-    return {
-        "total_trades": 47,
-        "win_rate": 0.638,
-        "profit_factor": 1.82,
-        "sharpe_ratio": 1.34,
-        "max_drawdown": 4.2,
-        "avg_win": 120.5,
-        "avg_loss": -66.3,
-        "total_pnl": 3247.80,
-    }
+    """Return performance metrics calculated from closed trade history."""
+    from trading.trade_repository import TradeRepository
+
+    repo = TradeRepository()
+    return await repo.get_performance_stats()
