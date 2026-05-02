@@ -5,11 +5,11 @@ from fastapi import APIRouter, Request
 
 router = APIRouter()
 
-_VIX_TTL = 60        # 1 minute
-_NEWS_TTL = 300      # 5 minutes
-_COT_TTL = 3600      # 1 hour
-_FEDWATCH_TTL = 1800 # 30 minutes
-_SECTOR_TTL = 600    # 10 minutes
+VIX_CACHE_TTL_SECONDS = 60        # 1 minute
+NEWS_CACHE_TTL_SECONDS = 300      # 5 minutes
+COT_CACHE_TTL_SECONDS = 3600      # 1 hour
+FEDWATCH_CACHE_TTL_SECONDS = 1800 # 30 minutes
+SECTOR_CACHE_TTL_SECONDS = 600    # 10 minutes
 
 
 @router.get("/cot")
@@ -20,7 +20,7 @@ async def get_cot_data(request: Request) -> dict[str, Any]:
         return cached
     cot = request.app.state.cot_analyzer
     data = await cot.get_analysis()
-    await cache.set("analysis:cot", data, ttl=_COT_TTL)
+    await cache.set("analysis:cot", data, ttl=COT_CACHE_TTL_SECONDS)
     return data
 
 
@@ -35,7 +35,7 @@ async def get_news(request: Request, limit: int = 20) -> dict[str, Any]:
     events = monitor.get_high_impact_events(limit=limit)
     sentiment = await monitor.analyze_news_sentiment()
     data = {"events": events, "sentiment": sentiment}
-    await cache.set(cache_key, data, ttl=_NEWS_TTL)
+    await cache.set(cache_key, data, ttl=NEWS_CACHE_TTL_SECONDS)
     return data
 
 
@@ -54,7 +54,7 @@ async def get_vix(request: Request) -> dict[str, Any]:
         return cached
     vix = request.app.state.vix_analyzer
     data = await vix.get_signal()
-    await cache.set("analysis:vix", data, ttl=_VIX_TTL)
+    await cache.set("analysis:vix", data, ttl=VIX_CACHE_TTL_SECONDS)
     return data
 
 
@@ -68,7 +68,7 @@ async def get_fedwatch(request: Request) -> dict[str, Any]:
 
     fw = FedWatchAnalyzer()
     data = await fw.get_market_positioning()
-    await cache.set("analysis:fedwatch", data, ttl=_FEDWATCH_TTL)
+    await cache.set("analysis:fedwatch", data, ttl=FEDWATCH_CACHE_TTL_SECONDS)
     return data
 
 
@@ -94,5 +94,5 @@ async def get_sector_rotation(request: Request) -> dict[str, Any]:
 
     analyzer = SectorRotationAnalyzer()
     data = await analyzer.analyze_capital_flows()
-    await cache.set("analysis:sector", data, ttl=_SECTOR_TTL)
+    await cache.set("analysis:sector", data, ttl=SECTOR_CACHE_TTL_SECONDS)
     return data

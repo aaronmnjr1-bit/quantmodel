@@ -93,13 +93,20 @@ async def close_position(ticket: int, request: Request) -> dict[str, Any]:
     from trading.mt5_engine import MT5Engine
 
     engine = MT5Engine()
+
+    # Capture PnL from open position before closing
+    positions = await engine.get_positions()
+    pos_pnl = next(
+        (p.get("pnl", 0.0) for p in positions if p.get("ticket") == ticket), 0.0
+    )
+
     try:
         result = await engine.close_position(ticket)
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to close position")
 
     if result.get("success"):
-        await _trade_repo.close_trade(ticket, close_pnl=0.0)
+        await _trade_repo.close_trade(ticket, close_pnl=pos_pnl)
 
     return result
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+import numpy as np
 from loguru import logger
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.trade import Trade, TradeDirection, TradeStatus
@@ -114,8 +115,9 @@ class TradeRepository:
                 avg_win = gross_profit / len(wins) if wins else 0.0
                 avg_loss = -(gross_loss / len(losses)) if losses else 0.0
 
-                # Peak-to-trough drawdown using running cumulative PnL
-                pnls = sorted(closed, key=lambda t: t.opened_at or datetime.datetime.min)
+                # Peak-to-trough drawdown using running cumulative PnL ordered by trade open time
+                with_time = [t for t in closed if t.opened_at is not None]
+                pnls = sorted(with_time, key=lambda t: t.opened_at)  # type: ignore[arg-type]
                 cumulative = 0.0
                 peak = 0.0
                 max_dd = 0.0
@@ -127,8 +129,7 @@ class TradeRepository:
                     if dd > max_dd:
                         max_dd = dd
 
-                # Sharpe-like ratio (mean / std of PnLs, annualised roughly)
-                import numpy as np
+                # Sharpe-like ratio (mean / std of PnLs)
                 pnl_arr = [t.pnl for t in closed]
                 sharpe = (
                     float(np.mean(pnl_arr)) / max(float(np.std(pnl_arr)), 0.01)
