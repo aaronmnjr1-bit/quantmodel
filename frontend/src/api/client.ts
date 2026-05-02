@@ -39,6 +39,11 @@ export const tradingApi = {
     client.post(`/api/trading/approve/${tradeId}`),
   rejectTrade: (tradeId: string) =>
     client.delete(`/api/trading/pending/${tradeId}`),
+  getHistory: (limit = 100, symbol?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (symbol) params.append('symbol', symbol)
+    return client.get(`/api/trading/history?${params}`)
+  },
 }
 
 export const analysisApi = {

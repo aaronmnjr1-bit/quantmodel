@@ -10,6 +10,7 @@ from loguru import logger
 from config import settings
 from core.websocket_manager import WebSocketManager
 from core.bot_state import BotState
+from core.cache import cache
 from api.trading import router as trading_router
 from api.analysis import router as analysis_router
 from api.risk import router as risk_router
@@ -17,12 +18,15 @@ from api.dashboard import router as dashboard_router
 from analysis.news_monitor import NewsMonitor
 from analysis.vix_analyzer import VIXAnalyzer
 from analysis.cot_analyzer import COTAnalyzer
+from database import create_tables
+from trading.mt5_engine import MT5Engine
 
 ws_manager = WebSocketManager()
 bot_state = BotState()
 news_monitor = NewsMonitor()
 vix_analyzer = VIXAnalyzer()
 cot_analyzer = COTAnalyzer()
+mt5_engine = MT5Engine()
 
 
 async def _broadcast_loop() -> None:
@@ -65,6 +69,27 @@ async def _cot_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting QuantModel backend…")
+
+    # Initialise database tables
+    try:
+        await create_tables()
+        logger.info("Database tables ready")
+    except Exception as exc:
+        logger.warning(f"DB init failed (will retry on first request): {exc}")
+
+    # Connect Redis cache
+    await cache.connect()
+
+    # Connect MT5 if credentials are configured
+    if settings.MT5_LOGIN and settings.MT5_PASSWORD and settings.MT5_SERVER:
+        mt5_engine.connect(
+            login=settings.MT5_LOGIN,
+            password=settings.MT5_PASSWORD,
+            server=settings.MT5_SERVER,
+        )
+    else:
+        logger.info("MT5 credentials not set — running in simulate mode")
+
     tasks = [
         asyncio.create_task(_broadcast_loop()),
         asyncio.create_task(_news_loop()),
@@ -75,9 +100,13 @@ async def lifespan(app: FastAPI):
     app.state.news_monitor = news_monitor
     app.state.vix_analyzer = vix_analyzer
     app.state.cot_analyzer = cot_analyzer
+    app.state.mt5_engine = mt5_engine
+    app.state.cache = cache
     yield
     for task in tasks:
         task.cancel()
+    await cache.disconnect()
+    mt5_engine.disconnect()
     logger.info("QuantModel backend shut down.")
 
 

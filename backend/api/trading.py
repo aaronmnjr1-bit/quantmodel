@@ -4,7 +4,10 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from trading.trade_repository import TradeRepository
+
 router = APIRouter()
+_trade_repo = TradeRepository()
 
 
 class TradeRequest(BaseModel):
@@ -45,6 +48,7 @@ async def execute_trade(request: Request, trade_req: TradeRequest) -> dict[str, 
     from trading.mt5_engine import MT5Engine
 
     engine = MT5Engine()
+    bot_state = request.app.state.bot_state
     try:
         result = await engine.execute_trade(
             symbol=trade_req.symbol,
@@ -56,6 +60,22 @@ async def execute_trade(request: Request, trade_req: TradeRequest) -> dict[str, 
         )
     except Exception:
         raise HTTPException(status_code=500, detail="Trade execution failed")
+
+    if result.get("success"):
+        await _trade_repo.save_trade(
+            symbol=trade_req.symbol,
+            direction=trade_req.direction,
+            volume=trade_req.volume,
+            entry_price=result.get("price"),
+            sl=trade_req.sl,
+            tp=trade_req.tp,
+            ticket=result.get("ticket"),
+            mode=bot_state.mode,
+            comment=trade_req.comment,
+            status="open",
+        )
+        bot_state.trades_today += 1
+
     return result
 
 
@@ -77,6 +97,10 @@ async def close_position(ticket: int, request: Request) -> dict[str, Any]:
         result = await engine.close_position(ticket)
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to close position")
+
+    if result.get("success"):
+        await _trade_repo.close_trade(ticket, close_pnl=0.0)
+
     return result
 
 
@@ -108,3 +132,11 @@ async def reject_trade(trade_id: str, request: Request) -> dict[str, Any]:
     if not result:
         raise HTTPException(status_code=404, detail="Trade not found")
     return {"status": "rejected", "trade_id": trade_id}
+
+
+@router.get("/history")
+async def get_trade_history(
+    limit: int = 100, symbol: str | None = None
+) -> dict[str, Any]:
+    trades = await _trade_repo.get_history(limit=limit, symbol=symbol)
+    return {"trades": trades, "count": len(trades)}
